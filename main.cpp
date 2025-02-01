@@ -130,7 +130,7 @@ private:
         if (t->isPointerTy()) {
             auto underlying_t = t->getNonOpaquePointerElementType();
             if (isInterestingType(underlying_t)) {
-                return builder.CreateLoad(t, singletons[dyn_cast<StructType>(underlying_t)]);
+                return singletons[dyn_cast<StructType>(underlying_t)];
             } else {
                 return ConstantPointerNull::get(dyn_cast<PointerType>(t));
             }
@@ -291,8 +291,7 @@ private:
 
         builder.SetInsertPoint(body);
 
-        Value *struct_ptr = builder.CreateLoad(T->getPointerTo(), singletons[T]);
-        Value *ptr_gep = builder.CreateStructGEP(T, struct_ptr, field_idx);
+        Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], field_idx);
         Value *fptr = builder.CreateLoad(stub_type->getPointerTo(), ptr_gep);
         // fptr contains field value from singleton
         Value* call = builder.CreateCall(stub_type, fptr, args);
