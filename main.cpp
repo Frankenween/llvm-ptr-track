@@ -50,7 +50,6 @@ struct StructVisitorPass : public ModulePass {
         // Create all possible stubs to be ready for function calls
         for (auto type : M.getIdentifiedStructTypes()) {
             createSingleton(M, type);
-            outs() << "Singleton for " << type->getName() << " created\n";
         }
         outs() << "Singletons created\n";
         outs().flush();

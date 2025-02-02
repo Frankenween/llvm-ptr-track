@@ -10,4 +10,5 @@ for file in "$IR_SRC"/*.ll; do
     then
         echo "Failed test $SRC_NAME"
     fi
+    echo
 done
