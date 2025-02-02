@@ -219,8 +219,10 @@ private:
                     createStubFunction(M, interesting_t, i);
                     // add initializer
                     initializeStructureField(M, interesting_t, i);
+                } else if (isInterestingType(field)) {
+                    initializeStructureField(M, interesting_t, i);
                 }
-                // TODO: substructure and pointer to structure
+                // TODO: pointer to structure
             }
         }
     }
@@ -231,15 +233,35 @@ private:
         LLVMContext &ctx = M.getContext();
         IRBuilder<> builder(ctx);
         builder.SetInsertPoint(global_initializer_bb);
+        Type* field_type = T->getTypeAtIndex(field_idx);
 
-        if (dereferenceFPtr(T->getTypeAtIndex(field_idx))) {
+        if (dereferenceFPtr(field_type)) {
             Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], field_idx);
             builder.CreateStore(
                 function_stubs[{T, field_idx}],
                 ptr_gep
             );
+        } else if (isInterestingType(field_type)) {
+            auto subtype_singleton = singletons[dyn_cast<StructType>(field_type)];
+            Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], field_idx);
+            // Store written values into the underling singleton
+            builder.CreateMemCpy(
+                    subtype_singleton,
+                    MaybeAlign(),
+                    ptr_gep,
+                    MaybeAlign(),
+                    M.getDataLayout().getTypeAllocSize(T)
+            );
+            // Extract written values from underlying singleton to the outer structure
+            builder.CreateMemCpy(
+                    ptr_gep,
+                    MaybeAlign(),
+                    subtype_singleton,
+                    MaybeAlign(),
+                    M.getDataLayout().getTypeAllocSize(T)
+            );
+
         }
-        // TODO: substructure - copy existing singleton
         // TODO: pointer - write pointer to the singleton
     }
 
