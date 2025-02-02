@@ -29,6 +29,16 @@ FunctionType* dereferenceFPtr(Type *t) {
     return nullptr;
 }
 
+Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value* src, Value* dst) {
+    return builder.CreateMemCpy(
+            dst,
+            MaybeAlign(),
+            src,
+            MaybeAlign(),
+            M.getDataLayout().getTypeAllocSize(T)
+    );
+}
+
 std::string funcStubName(const std::string &struct_name, size_t idx) {
     return PREFIX + "_" + struct_name + "_" + std::to_string(idx) + "_stub";
 }
@@ -216,12 +226,10 @@ private:
                 auto field = interesting_t->getElementType(i);
                 if (isFunctionPointer(field)) {
                     createStubFunction(M, interesting_t, i);
-                    // add initializer
-                    initializeStructureField(M, interesting_t, i);
-                } else if (isInterestingType(field)) {
+                }
+                if (isFunctionPointer(field) || isInterestingTypeOrPtr(field)) {
                     initializeStructureField(M, interesting_t, i);
                 }
-                // TODO: pointer to structure
             }
         }
     }
@@ -244,24 +252,20 @@ private:
             auto subtype_singleton = singletons[dyn_cast<StructType>(field_type)];
             Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], field_idx);
             // Store written values into the underling singleton
-            builder.CreateMemCpy(
-                    subtype_singleton,
-                    MaybeAlign(),
-                    ptr_gep,
-                    MaybeAlign(),
-                    M.getDataLayout().getTypeAllocSize(T)
-            );
+            copyStructBetweenPointers(M, builder, field_type, ptr_gep, subtype_singleton);
             // Extract written values from underlying singleton to the outer structure
-            builder.CreateMemCpy(
-                    ptr_gep,
-                    MaybeAlign(),
-                    subtype_singleton,
-                    MaybeAlign(),
-                    M.getDataLayout().getTypeAllocSize(T)
-            );
-
+            copyStructBetweenPointers(M, builder, field_type, subtype_singleton, ptr_gep);
+        } else if (isPtrToInterestingType(field_type)) {
+            auto subtype_singleton = singletons[
+                    dyn_cast<StructType>(field_type->getNonOpaquePointerElementType())
+            ];
+            Value* ptr_ptr_t = builder.CreateStructGEP(T, singletons[T], field_idx);
+            Value* loaded_ptr = builder.CreateLoad(field_type, ptr_ptr_t);
+            // Propagate subtype values to the outer structure
+            builder.CreateStore(subtype_singleton, ptr_ptr_t);
+            // Extract written values from underlying singleton to the outer structure
+            copyStructBetweenPointers(M, builder, field_type, subtype_singleton, loaded_ptr);
         }
-        // TODO: pointer - write pointer to the singleton
     }
 
     // Create a singleton with a given type and no fields
@@ -339,8 +343,11 @@ private:
                 } else if (auto *substruct = dyn_cast<StructType>(field)) {
                     // Add backlink to the subfield
                     backlinks[substruct].insert(s);
+                } else if (auto *substruct_ptr = dyn_cast<PointerType>(field)) {
+                    if (auto *par = dyn_cast<StructType>(substruct_ptr->getNonOpaquePointerElementType())) {
+                        backlinks[par].insert(s);
+                    }
                 }
-                // TODO: pointer to structure
             }
             if (was_interesting) {
                 // This is a base interesting structure
