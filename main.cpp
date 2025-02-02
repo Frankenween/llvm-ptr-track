@@ -209,46 +209,6 @@ private:
         }
     }
 
-    void createGlobalInitializer(Module &M) {
-        std::string initializer_name = PREFIX + "_global_initializer";
-        LLVMContext &ctx = M.getContext();
-        global_initializer = Function::Create(
-                FunctionType::get(Type::getVoidTy(ctx), false),
-                Function::ExternalLinkage,
-                initializer_name,
-                M
-        );
-        global_initializer_bb = BasicBlock::Create(ctx, "", global_initializer);
-        new_functions.insert(global_initializer);
-    }
-
-    void finalizeGlobalInitializer(Module &M) {
-        LLVMContext &ctx = M.getContext();
-        IRBuilder<> builder(ctx);
-        builder.SetInsertPoint(global_initializer_bb);
-        builder.CreateRetVoid();
-    }
-
-    void createFunctionCaller(Module &M) {
-        std::string initializer_name = PREFIX + "_function_caller";
-        LLVMContext &ctx = M.getContext();
-        functions_caller = Function::Create(
-                FunctionType::get(Type::getVoidTy(ctx), false),
-                Function::ExternalLinkage,
-                initializer_name,
-                M
-        );
-        functions_caller_bb = BasicBlock::Create(ctx, "", functions_caller);
-        new_functions.insert(functions_caller);
-    }
-
-    void finalizeFunctionCaller(Module &M) {
-        LLVMContext &ctx = M.getContext();
-        IRBuilder<> builder(ctx);
-        builder.SetInsertPoint(functions_caller_bb);
-        builder.CreateRetVoid();
-    }
-
     // This field is interesting, initialize it
     // In case of function pointer store the corresponding stub for it
     void initializeStructureField(Module &M, StructType *T, size_t field_idx) {
@@ -362,6 +322,48 @@ private:
                 }
             }
         }
+    }
+
+    // Function initializers and finalizers
+
+    void createGlobalInitializer(Module &M) {
+        std::string initializer_name = PREFIX + "_global_initializer";
+        LLVMContext &ctx = M.getContext();
+        global_initializer = Function::Create(
+                FunctionType::get(Type::getVoidTy(ctx), false),
+                Function::ExternalLinkage,
+                initializer_name,
+                M
+        );
+        global_initializer_bb = BasicBlock::Create(ctx, "", global_initializer);
+        new_functions.insert(global_initializer);
+    }
+
+    void finalizeGlobalInitializer(Module &M) {
+        LLVMContext &ctx = M.getContext();
+        IRBuilder<> builder(ctx);
+        builder.SetInsertPoint(global_initializer_bb);
+        builder.CreateRetVoid();
+    }
+
+    void createFunctionCaller(Module &M) {
+        std::string initializer_name = PREFIX + "_function_caller";
+        LLVMContext &ctx = M.getContext();
+        functions_caller = Function::Create(
+                FunctionType::get(Type::getVoidTy(ctx), false),
+                Function::ExternalLinkage,
+                initializer_name,
+                M
+        );
+        functions_caller_bb = BasicBlock::Create(ctx, "", functions_caller);
+        new_functions.insert(functions_caller);
+    }
+
+    void finalizeFunctionCaller(Module &M) {
+        LLVMContext &ctx = M.getContext();
+        IRBuilder<> builder(ctx);
+        builder.SetInsertPoint(functions_caller_bb);
+        builder.CreateRetVoid();
     }
 };
 
