@@ -94,12 +94,13 @@ private:
         return false;
     }
 
+    bool isPtrToInterestingType(Type *t) {
+        return t->isPointerTy() && isInterestingType(t->getNonOpaquePointerElementType());
+    }
+
     // Check is this is an interesting type or a pointer to an interesting type
     bool isInterestingTypeOrPtr(Type *t) {
-        if (isInterestingType(t)) {
-            return true;
-        }
-        return t->isPointerTy() && isInterestingType(t->getNonOpaquePointerElementType());
+        return isInterestingType(t) || isPtrToInterestingType(t);
     }
 
     // Check if any function argument or return value are interesting
@@ -160,9 +161,24 @@ private:
         }
         auto call_ret = builder.CreateCall(f, call_args);
 
+        // Big structures are not usually returned by value
+        // Instead, function accepts a pointer to return value
         if (isInterestingType(f->getReturnType())) {
-            // Contract: singletons exist for interesting type
-            // TODO: add store code
+            outs() << "WARNING: Function returning interesting type by value!\n";
+            outs().flush();
+            f->getFunctionType()->dump();
+            outs().flush();
+            return;
+        }
+        if (isPtrToInterestingType(f->getReturnType())) {
+            auto* ret_struct = dyn_cast<StructType>(f->getReturnType()->getNonOpaquePointerElementType());
+            builder.CreateMemCpy(
+                singletons[ret_struct],
+                MaybeAlign(),
+                call_ret,
+                MaybeAlign(),
+                M.getDataLayout().getTypeAllocSize(ret_struct)
+            );
         }
     }
 
