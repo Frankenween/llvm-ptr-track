@@ -94,6 +94,7 @@ private:
         return false;
     }
 
+    // Check is this is an interesting type or a pointer to an interesting type
     bool isInterestingTypeOrPtr(Type *t) {
         if (isInterestingType(t)) {
             return true;
@@ -101,6 +102,7 @@ private:
         return t->isPointerTy() && isInterestingType(t->getNonOpaquePointerElementType());
     }
 
+    // Check if any function argument or return value are interesting
     bool functionContainsInterestingStruct(FunctionType *f_type) {
         if (isInterestingTypeOrPtr(f_type->getReturnType())) {
             return true;
@@ -111,6 +113,9 @@ private:
         );
     }
 
+    // Create an argument default value
+    // Flow-sensitivity is not expected from the following analysis, so it's fine to put any fitting value
+    // But here we try to use singletons as much as we can
     Value* constructTypeValue(Type *t, IRBuilder<> &builder) {
         if (t->isIntegerTy()) {
             return builder.getIntN(t->getIntegerBitWidth(), 0);
@@ -142,6 +147,8 @@ private:
         exit(1);
     }
 
+    // Make a call to the function and save the return value, if needed
+    // Whenever it is possible, singletons are used as arguments
     void createDummyFunctionCall(Module &M, Function *f) {
         LLVMContext &ctx = M.getContext();
         IRBuilder<> builder(ctx);
@@ -159,6 +166,9 @@ private:
         }
     }
 
+    // Make calls to all functions, that consume or produce interesting structures
+    // to track written and read values. Currently internal functions are skipped as they
+    // cannot be called from outside.
     void propagateSingletons(Module &M) {
         for (auto &f : M.getFunctionList()) {
             if (new_functions.contains(&f)) {
@@ -182,6 +192,8 @@ private:
         }
     }
 
+    // Iterate over all structures and instrument all interesting fields
+    // In case of function pointer - create a stub for it and store it into the singleton
     void fillSingletons(Module &M) {
         for (auto interesting_t : interesting_types) {
             // Dummy object is already created for this type
@@ -237,7 +249,8 @@ private:
         builder.CreateRetVoid();
     }
 
-
+    // This field is interesting, initialize it
+    // In case of function pointer store the corresponding stub for it
     void initializeStructureField(Module &M, StructType *T, size_t field_idx) {
         LLVMContext &ctx = M.getContext();
         IRBuilder<> builder(ctx);
@@ -250,10 +263,13 @@ private:
                 ptr_gep
             );
         }
-        // TODO: substructure and pointer to structure
+        // TODO: substructure - copy existing singleton
+        // TODO: pointer - write pointer to the singleton
     }
 
     // Create a singleton with a given type and no fields
+    // Created objects are marked external to avoid initialization
+    // FIXME: make zeroed somehow?
     GlobalVariable* createSingleton(Module &M, StructType *T) {
         if (singletons.contains(T)) {
             return singletons[T];
@@ -267,6 +283,9 @@ private:
         return var;
     }
 
+    // Create a stub function, that will track field_idx field in a StructType T
+    // This function reads corresponding field from the singleton and calls it
+    // Its type is the same as in the structure, so arguments are just forwarded and the same return value is used
     Function* createStubFunction(Module &M, StructType *T, size_t field_idx) {
         auto name = funcStubName(T->getName().operator std::string(), field_idx);
         FunctionType *stub_type = dereferenceFPtr(T->getTypeAtIndex(field_idx));
@@ -307,6 +326,8 @@ private:
         return f;
     }
 
+    // Iterate over all structures and find structs with function pointers
+    // After in find all structures, that contain interesting fields(as structs or pointers)
     void inspectStructs(Module &M) {
         std::unordered_map<StructType*, std::set<StructType*>> backlinks;
         std::vector<StructType*> work_list;
