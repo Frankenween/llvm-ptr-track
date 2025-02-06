@@ -21,6 +21,7 @@ set_target_properties(kernel_instrument PROPERTIES
 )
 
 add_custom_target(run_tests
-        "${PROJECT_SOURCE_DIR}/test.sh" "${PROJECT_SOURCE_DIR}/test-ir" "${PROJECT_SOURCE_DIR}/test-results" "${PROJECT_BINARY_DIR}/pass.so"
+        "${PROJECT_SOURCE_DIR}/tests/test.sh" "${PROJECT_BINARY_DIR}/pass.so"
         DEPENDS kernel_instrument
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tests"
 )
