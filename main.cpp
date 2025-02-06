@@ -29,6 +29,13 @@ FunctionType* dereferenceFPtr(Type *t) {
     return nullptr;
 }
 
+StructType* dereferenceStructPtr(Type *t) {
+    if (auto ptr = dyn_cast<PointerType>(t)) {
+        return dyn_cast<StructType>(t->getNonOpaquePointerElementType());
+    }
+    return nullptr;
+}
+
 Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value* src, Value* dst) {
     return builder.CreateMemCpy(
             dst,
@@ -69,6 +76,12 @@ struct StructVisitorPass : public ModulePass {
         outs().flush();
 
         propagateSingletons(M);
+        outs() << "Singletons pushed\n";
+        outs().flush();
+
+        implementAllInterestingDeclarations(M);
+        outs() << "Functions implemented\n";
+        outs().flush();
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
@@ -200,6 +213,12 @@ private:
                 // Do not instrument newly created functions
                 continue;
             }
+            // Skip functions without body
+            if (f.isDeclaration()) {
+                outs() << "Dropping function " << f.getName() << " due to missing body\n";
+                outs().flush();
+                continue;
+            }
             // Skip hidden functions, they are not visible from outside
             if (f.hasInternalLinkage() || f.hasPrivateLinkage()) {
                 outs() << "Dropping function " << f.getName() << " due to hidden linkage\n";
@@ -214,6 +233,14 @@ private:
             outs() << "Making call for " << f.getName() << "\n";
             outs().flush();
             createDummyFunctionCall(M, &f);
+        }
+    }
+
+    void implementAllInterestingDeclarations(Module &M) {
+        for (auto &f : M.getFunctionList()) {
+            if (functionContainsInterestingStruct(f.getFunctionType()) && f.isDeclaration()) {
+                createStubForDeclaredFunction(M, &f);
+            }
         }
     }
 
@@ -282,6 +309,39 @@ private:
         );
         singletons[T] = var;
         return var;
+    }
+
+    // Implement all declared functions to collect passed values
+    void createStubForDeclaredFunction(Module &M, Function *f) {
+        auto f_type = f->getFunctionType();
+        IRBuilder<> builder(M.getContext());
+        BasicBlock *bb = BasicBlock::Create(M.getContext(), "", f);
+        builder.SetInsertPoint(bb);
+
+        size_t i = 0;
+        for (auto arg : f_type->params()) {
+            if (isPtrToInterestingType(arg)) {
+                copyStructBetweenPointers(
+                    M, builder, dereferenceStructPtr(arg),
+                    f->getArg(i), singletons[dereferenceStructPtr(arg)]
+                );
+                copyStructBetweenPointers(
+                        M, builder, dereferenceStructPtr(arg),
+                        singletons[dereferenceStructPtr(arg)], f->getArg(i)
+                );
+            } else if (isInterestingType(arg)) {
+                outs() << "WARNING: Function getting interesting type by value!!\n";
+                outs().flush();
+                // TODO: add value-pass support
+            }
+            i++;
+        }
+        if (f_type->getReturnType()->isVoidTy()) {
+            builder.CreateRetVoid();
+        } else {
+            auto ret_value = constructTypeValue(f_type->getReturnType(), builder);
+            builder.CreateRet(ret_value);
+        }
     }
 
     // Create a stub function, that will track field_idx field in a StructType T
