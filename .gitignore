@@ -3,3 +3,4 @@ cmake-build-*
 .idea
 tests/ir
 tests/ir-final
+tests/dot

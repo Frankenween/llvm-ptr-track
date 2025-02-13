@@ -215,22 +215,15 @@ private:
             }
             // Skip functions without body
             if (f.isDeclaration()) {
-                outs() << "Dropping function " << f.getName() << " due to missing body\n";
-                outs().flush();
                 continue;
             }
             // Skip hidden functions, they are not visible from outside
             if (f.hasInternalLinkage() || f.hasPrivateLinkage()) {
-                outs() << "Dropping function " << f.getName() << " due to hidden linkage\n";
-                outs().flush();
                 continue;
             }
             if (!functionContainsInterestingStruct(f.getFunctionType())) {
-                outs() << "Dropping function " << f.getName() << " due to boring args\n";
-                outs().flush();
                 continue;
             }
-            outs() << "Making call for " << f.getName() << "\n";
             outs().flush();
             createDummyFunctionCall(M, &f);
         }
