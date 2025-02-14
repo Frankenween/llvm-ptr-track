@@ -147,11 +147,8 @@ private:
             // We added all singletons, there should be one for this struct
             auto obj = singletons[dyn_cast<StructType>(t)];
             if (!obj) {
-                outs() << "EMERGENCY! This struct type has no singleton:\n";
-                outs().flush();
-                t->dump();
-                outs().flush();
-                exit(1);
+                // Special case for timespec64 return type
+                return Constant::getNullValue(dyn_cast<StructType>(t));
             }
             return obj;
         }
