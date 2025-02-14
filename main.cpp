@@ -287,14 +287,14 @@ private:
 
     // Create a singleton with a given type and no fields
     // Created objects are marked external to avoid initialization
-    // FIXME: make zeroed somehow?
     GlobalVariable* createSingleton(Module &M, StructType *T) {
         if (singletons.contains(T)) {
             return singletons[T];
         }
         // Mark is as external to avoid initializing structure
         auto *var = new GlobalVariable(
-                M, T, false, GlobalValue::ExternalLinkage, nullptr,
+                M, T, false, GlobalValue::InternalLinkage,
+                Constant::getNullValue(T),
                 structSingletonName(T->getName().operator std::string())
         );
         singletons[T] = var;
