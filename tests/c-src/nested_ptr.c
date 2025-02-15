@@ -25,12 +25,12 @@ void fill_inner_t(struct inner_t *v) {
 }
 
 void call_nested_value(struct nested_value *v) {
-    // Expect f1 and f1
+    // Expect f1 and f2
 	v->x->f();
 }
 
 void call_inner_t(struct inner_t *v) {
-    // Expect f1 and f1
+    // Expect f1 and f2
     v->f();
 }
 
