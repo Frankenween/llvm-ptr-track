@@ -244,45 +244,48 @@ private:
                 if (isFunctionPointer(field)) {
                     createStubFunction(M, interesting_t, i);
                 }
-                if (isFunctionPointer(field) || isInterestingTypeOrPtr(field)) {
-                    initializeStructureField(M, interesting_t, i);
-                }
             }
+            initializeStructureFields(M, interesting_t);
         }
     }
 
     // This field is interesting, initialize it
     // In case of function pointer store the corresponding stub for it
-    void initializeStructureField(Module &M, StructType *T, size_t field_idx) {
-        LLVMContext &ctx = M.getContext();
-        IRBuilder<> builder(ctx);
+    void initializeStructureFields(Module &M, StructType *T) {
+        // Used for nested interesting structs
+        IRBuilder<> builder(M.getContext());
         builder.SetInsertPoint(global_initializer_bb);
-        Type* field_type = T->getTypeAtIndex(field_idx);
 
-        if (dereferenceFPtr(field_type)) {
-            Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], field_idx);
-            builder.CreateStore(
-                function_stubs[{T, field_idx}],
-                ptr_gep
-            );
-        } else if (isInterestingType(field_type)) {
-            auto subtype_singleton = singletons[dyn_cast<StructType>(field_type)];
-            Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], field_idx);
-            // Store written values into the underling singleton
-            copyStructBetweenPointers(M, builder, field_type, ptr_gep, subtype_singleton);
-            // Extract written values from underlying singleton to the outer structure
-            copyStructBetweenPointers(M, builder, field_type, subtype_singleton, ptr_gep);
-        } else if (isPtrToInterestingType(field_type)) {
-            auto subtype_singleton = singletons[
-                    dyn_cast<StructType>(field_type->getNonOpaquePointerElementType())
-            ];
-            Value* ptr_ptr_t = builder.CreateStructGEP(T, singletons[T], field_idx);
-            Value* loaded_ptr = builder.CreateLoad(field_type, ptr_ptr_t);
-            // Propagate subtype values to the outer structure
-            builder.CreateStore(subtype_singleton, ptr_ptr_t);
-            // Extract written values from underlying singleton to the outer structure
-            copyStructBetweenPointers(M, builder, field_type, subtype_singleton, loaded_ptr);
+        std::vector<Constant*> new_init;
+
+        for (size_t i = 0; i < T->getNumElements(); i++) {
+            auto field_type = T->getElementType(i);
+            if (isFunctionPointer(field_type)) {
+                new_init.push_back(function_stubs[{T, i}]);
+            } else if (isInterestingType(field_type)) {
+                // Zero-initialize field in struct definition
+                new_init.push_back(Constant::getNullValue(field_type));
+
+                // Share data between singleton and this field
+                auto subtype_singleton = singletons[dyn_cast<StructType>(field_type)];
+                Value *ptr_gep = builder.CreateStructGEP(T, singletons[T], i);
+                // Store written values into the underling singleton
+                copyStructBetweenPointers(M, builder, field_type, ptr_gep, subtype_singleton);
+                // Extract written values from underlying singleton to the outer structure
+                copyStructBetweenPointers(M, builder, field_type, subtype_singleton, ptr_gep);
+            } else if (isPtrToInterestingType(field_type)) {
+                auto subtype_singleton = singletons[
+                        dyn_cast<StructType>(field_type->getNonOpaquePointerElementType())
+                ];
+                new_init.push_back(subtype_singleton);
+            } else {
+                new_init.push_back(Constant::getNullValue(field_type));
+            }
         }
+
+        singletons[T]->setInitializer(
+            ConstantStruct::get(T, new_init)
+        );
     }
 
     // Create a singleton with a given type and no fields
@@ -294,7 +297,7 @@ private:
         // Mark is as external to avoid initializing structure
         auto *var = new GlobalVariable(
                 M, T, false, GlobalValue::InternalLinkage,
-                Constant::getNullValue(T),
+                ConstantStruct::getNullValue(T), // Definition is required for internal linkage
                 structSingletonName(T->getName().operator std::string())
         );
         singletons[T] = var;
