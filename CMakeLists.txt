@@ -14,6 +14,10 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_library(kernel_instrument SHARED
         main.cpp
+        struct_filter.cpp
+        struct_filter.h
+        util.cpp
+        util.h
 )
 set_target_properties(kernel_instrument PROPERTIES
         OUTPUT_NAME "pass"

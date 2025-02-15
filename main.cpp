@@ -4,47 +4,12 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "util.h"
+#include "struct_filter.h"
 
 using namespace llvm;
 
 static const std::string PREFIX = "mypass";
-
-bool isFunctionPointer(Type *t) {
-    if (auto *PT = dyn_cast<PointerType>(t)) {
-        // Check if the element type of the pointer is a function type
-        if (dyn_cast<FunctionType>(PT->getNonOpaquePointerElementType())) {
-            return true;
-        }
-    }
-    return false;
-}
-
-FunctionType* dereferenceFPtr(Type *t) {
-    if (auto *PT = dyn_cast<PointerType>(t)) {
-        // Check if the element type of the pointer is a function type
-        if (auto type = dyn_cast<FunctionType>(PT->getNonOpaquePointerElementType())) {
-            return type;
-        }
-    }
-    return nullptr;
-}
-
-StructType* dereferenceStructPtr(Type *t) {
-    if (auto ptr = dyn_cast<PointerType>(t)) {
-        return dyn_cast<StructType>(t->getNonOpaquePointerElementType());
-    }
-    return nullptr;
-}
-
-Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value* src, Value* dst) {
-    return builder.CreateMemCpy(
-            dst,
-            MaybeAlign(),
-            src,
-            MaybeAlign(),
-            M.getDataLayout().getTypeAllocSize(T)
-    );
-}
 
 std::string funcStubName(const std::string &struct_name, size_t idx) {
     return PREFIX + "_" + struct_name + "_" + std::to_string(idx) + "_stub";
@@ -58,7 +23,7 @@ struct StructVisitorPass : public ModulePass {
     StructVisitorPass(): ModulePass(ID) {}
 
     bool runOnModule(Module &M) override {
-        inspectStructs(M);
+        type_tracker = struct_filter(&M);
         outs().flush();
 
         createGlobalInitializer(M);
@@ -85,13 +50,16 @@ struct StructVisitorPass : public ModulePass {
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
+
+        // Clean type_tracker
+        type_tracker = struct_filter();
         return true;
     }
 
     static char ID;
 private:
-    // Types with reachable function pointers
-    std::set<StructType*> interesting_types;
+    // Interesting types
+    struct_filter type_tracker;
     // data consumer objects for interesting types
     std::unordered_map<StructType*, GlobalVariable*> singletons;
     // field stubs
@@ -109,30 +77,14 @@ private:
     // Function caller block
     BasicBlock* functions_caller_bb = nullptr;
 
-    bool isInterestingType(Type *t) {
-        if (auto *ret = dyn_cast<StructType>(t)) {
-            return interesting_types.contains(ret);
-        }
-        return false;
-    }
-
-    bool isPtrToInterestingType(Type *t) {
-        return t->isPointerTy() && isInterestingType(t->getNonOpaquePointerElementType());
-    }
-
-    // Check is this is an interesting type or a pointer to an interesting type
-    bool isInterestingTypeOrPtr(Type *t) {
-        return isInterestingType(t) || isPtrToInterestingType(t);
-    }
-
     // Check if any function argument or return value are interesting
     bool functionContainsInterestingStruct(FunctionType *f_type) {
-        if (isInterestingTypeOrPtr(f_type->getReturnType())) {
+        if (type_tracker.isInterestingTypeOrPtr(f_type->getReturnType())) {
             return true;
         }
         return std::ranges::any_of(
                 f_type->params(),
-                [this](Type *t) { return isInterestingTypeOrPtr(t); }
+                [this](Type *t) { return type_tracker.isInterestingTypeOrPtr(t); }
         );
     }
 
@@ -154,7 +106,7 @@ private:
         }
         if (t->isPointerTy()) {
             auto underlying_t = t->getNonOpaquePointerElementType();
-            if (isInterestingType(underlying_t)) {
+            if (type_tracker.isInterestingType(underlying_t)) {
                 return singletons[dyn_cast<StructType>(underlying_t)];
             } else {
                 return ConstantPointerNull::get(dyn_cast<PointerType>(t));
@@ -182,14 +134,14 @@ private:
 
         // Big structures are not usually returned by value
         // Instead, function accepts a pointer to return value
-        if (isInterestingType(f->getReturnType())) {
+        if (type_tracker.isInterestingType(f->getReturnType())) {
             outs() << "WARNING: Function returning interesting type by value!\n";
             outs().flush();
             f->getFunctionType()->dump();
             outs().flush();
             return;
         }
-        if (isPtrToInterestingType(f->getReturnType())) {
+        if (type_tracker.isPtrToInterestingType(f->getReturnType())) {
             auto* ret_struct = dyn_cast<StructType>(f->getReturnType()->getNonOpaquePointerElementType());
             builder.CreateMemCpy(
                 singletons[ret_struct],
@@ -237,7 +189,7 @@ private:
     // Iterate over all structures and instrument all interesting fields
     // In case of function pointer - create a stub for it and store it into the singleton
     void fillSingletons(Module &M) {
-        for (auto interesting_t : interesting_types) {
+        for (auto interesting_t : type_tracker.getInterestingTypes()) {
             // Dummy object is already created for this type
             for (size_t i = 0; i < interesting_t->getNumElements(); i++) {
                 auto field = interesting_t->getElementType(i);
@@ -262,7 +214,7 @@ private:
             auto field_type = T->getElementType(i);
             if (isFunctionPointer(field_type)) {
                 new_init.push_back(function_stubs[{T, i}]);
-            } else if (isInterestingType(field_type)) {
+            } else if (type_tracker.isInterestingType(field_type)) {
                 // Zero-initialize field in struct definition
                 new_init.push_back(Constant::getNullValue(field_type));
 
@@ -273,7 +225,7 @@ private:
                 copyStructBetweenPointers(M, builder, field_type, ptr_gep, subtype_singleton);
                 // Extract written values from underlying singleton to the outer structure
                 copyStructBetweenPointers(M, builder, field_type, subtype_singleton, ptr_gep);
-            } else if (isPtrToInterestingType(field_type)) {
+            } else if (type_tracker.isPtrToInterestingType(field_type)) {
                 auto subtype_singleton = singletons[
                         dyn_cast<StructType>(field_type->getNonOpaquePointerElementType())
                 ];
@@ -313,7 +265,7 @@ private:
 
         size_t i = 0;
         for (auto arg : f_type->params()) {
-            if (isPtrToInterestingType(arg)) {
+            if (type_tracker.isPtrToInterestingType(arg)) {
                 copyStructBetweenPointers(
                     M, builder, dereferenceStructPtr(arg),
                     f->getArg(i), singletons[dereferenceStructPtr(arg)]
@@ -322,7 +274,7 @@ private:
                         M, builder, dereferenceStructPtr(arg),
                         singletons[dereferenceStructPtr(arg)], f->getArg(i)
                 );
-            } else if (isInterestingType(arg)) {
+            } else if (type_tracker.isInterestingType(arg)) {
                 outs() << "WARNING: Function getting interesting type by value!!\n";
                 outs().flush();
                 // TODO: add value-pass support
@@ -378,47 +330,6 @@ private:
         function_stubs[{T, field_idx}] = f;
         new_functions.insert(f);
         return f;
-    }
-
-    // Iterate over all structures and find structs with function pointers
-    // After in find all structures, that contain interesting fields(as structs or pointers)
-    void inspectStructs(Module &M) {
-        std::unordered_map<StructType*, std::set<StructType*>> backlinks;
-        std::vector<StructType*> work_list;
-
-        for (auto s : M.getIdentifiedStructTypes()) {
-            bool was_interesting = false;
-            for (auto field : s->elements()) {
-                if (isFunctionPointer(field)) {
-                    // This struct contains a pointer to a function
-                    interesting_types.insert(s);
-                    was_interesting = true;
-                } else if (auto *substruct = dyn_cast<StructType>(field)) {
-                    // Add backlink to the subfield
-                    backlinks[substruct].insert(s);
-                } else if (auto *substruct_ptr = dyn_cast<PointerType>(field)) {
-                    if (auto *par = dyn_cast<StructType>(substruct_ptr->getNonOpaquePointerElementType())) {
-                        backlinks[par].insert(s);
-                    }
-                }
-            }
-            if (was_interesting) {
-                // This is a base interesting structure
-                work_list.push_back(s);
-                // outs() << "Struct " << s->getName() << " marked interesting\n";
-            }
-        }
-        while (!work_list.empty()) {
-            auto s = work_list.back();
-            work_list.pop_back();
-            for (auto par : backlinks[s]) {
-                if (interesting_types.insert(par).second) {
-                    work_list.push_back(par);
-                    outs() << "Struct " << par->getName() << " marked interesting: ";
-                    outs() << par->getName() << " -> " << s->getName() << "\n";
-                }
-            }
-        }
     }
 
     // Function initializers and finalizers
