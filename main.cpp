@@ -40,6 +40,10 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons filled\n";
         outs().flush();
 
+        detectAllGlobals(M);
+        outs() << "Globals resolved\n";
+        outs().flush();
+
         propagateSingletons(M);
         outs() << "Singletons pushed\n";
         outs().flush();
@@ -184,6 +188,29 @@ private:
                 createStubForDeclaredFunction(M, &f);
             }
         }
+    }
+
+    // Temporal fix for tracking global values directly
+    // See: https://github.com/SVF-tools/SVF/issues/1650
+    void detectAllGlobals(Module &M) {
+        IRBuilder<> builder(M.getContext());
+        builder.SetInsertPoint(global_initializer_bb);
+
+        for (auto &glob : M.getGlobalList()) {
+            if (!type_tracker.isInterestingType(glob.getValueType())) {
+                continue;
+            }
+            auto *type = dyn_cast<StructType>(glob.getValueType());
+            auto singleton = singletons[type];
+            if (&glob == singleton) {
+                continue;
+            }
+            outs() << "Detected interesting global " << glob.getName() << "\n";
+            // obj -> singleton
+            copyStructBetweenPointers(M, builder, type, &glob, singleton);
+            // maybe singleton -> obj?
+        }
+        outs().flush();
     }
 
     // Iterate over all structures and instrument all interesting fields
