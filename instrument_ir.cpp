@@ -48,9 +48,9 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons pushed\n";
         outs().flush();
 
-        implementAllInterestingDeclarations(M);
-        outs() << "Functions implemented\n";
-        outs().flush();
+//        implementAllInterestingDeclarations(M);
+//        outs() << "Functions implemented\n";
+//        outs().flush();
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
@@ -171,7 +171,8 @@ private:
                 continue;
             }
             // Skip hidden functions, they are not visible from outside
-            if (f.hasInternalLinkage() || f.hasPrivateLinkage()) {
+            // TODO: filter functions that are really exported(maybe via pointer)
+            if (f.hasPrivateLinkage()) {
                 continue;
             }
             if (!functionContainsInterestingStruct(f.getFunctionType())) {
