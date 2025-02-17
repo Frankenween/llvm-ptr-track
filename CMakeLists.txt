@@ -25,7 +25,9 @@ set_target_properties(ir_instrument PROPERTIES
 )
 
 add_library(purge_stores SHARED
-    purge_stores.cpp
+        purge_stores.cpp
+        util.cpp
+        util.h
 )
 set_target_properties(purge_stores PROPERTIES
         OUTPUT_NAME "purge_stores"
