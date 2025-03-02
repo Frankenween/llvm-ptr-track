@@ -40,6 +40,10 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons filled\n";
         outs().flush();
 
+        replaceRestrictedCasts(M);
+        outs() << "Casts replaced\n";
+        outs().flush();
+
         detectAllGlobals(M);
         outs() << "Globals resolved\n";
         outs().flush();
@@ -121,6 +125,50 @@ private:
         t->dump();
         outs().flush();
         exit(1);
+    }
+
+    // Find all bitcasts, that can lead to ptr leak and replace them
+    // Run this AFTER creating singletons
+    void replaceRestrictedCasts(Module &M) {
+        for (auto &f : M) {
+            std::vector<Instruction*> remove_list;
+            for (auto &bb : f) {
+                for (auto &inst : bb) {
+                    if (auto *cast = dyn_cast<BitCastInst>(&inst)) {
+                        auto *dst_type = cast->getDestTy();
+                        auto *deref_dst_type = dyn_cast<PointerType>(dst_type);
+
+                        // SrcT* -> InterestingT*
+                        if (type_tracker.isPtrToInterestingType(dst_type)) {
+                            inst.replaceUsesWithIf(
+                                    singletons[dereferenceStructPtr(dst_type)],
+                                    [&](Use &u) {
+                                // FIXME: What's wrong with GEPs?
+                                return dyn_cast<GetElementPtrInst>(u.getUser()) == nullptr;
+                            });
+                        } else if (deref_dst_type &&
+                                type_tracker.isPtrToInterestingType(deref_dst_type->getNonOpaquePointerElementType())) {
+                            // This is a T* -> X** cast
+                            // X** will be later used for a load, so replace all loads with singleton
+                            for (auto *user : inst.users()) {
+                                if (auto *load = dyn_cast<LoadInst>(user)) {
+                                    load->replaceAllUsesWith(
+                                        singletons[
+                                            dereferenceStructPtr(deref_dst_type->getNonOpaquePointerElementType())
+                                        ]
+                                    );
+                                    remove_list.push_back(load);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for (auto i : remove_list) {
+                i->eraseFromParent();
+            }
+        }
+
     }
 
     // Make a call to the function and save the return value, if needed

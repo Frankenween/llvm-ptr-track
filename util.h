@@ -1,4 +1,5 @@
 #pragma once
+#include <unordered_set>
 #include "llvm/IR/IRBuilder.h"
 
 using namespace llvm;
@@ -12,3 +13,5 @@ FunctionType* dereferenceFPtr(Type *t);
 StructType* dereferenceStructPtr(Type *t);
 
 Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value* src, Value* dst);
+
+std::unordered_set<Type*> findAllStructsByName(Module &M, const std::unordered_set<std::string> &names);

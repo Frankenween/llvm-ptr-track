@@ -36,3 +36,15 @@ Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value
             M.getDataLayout().getTypeAllocSize(T)
     );
 }
+
+std::unordered_set<Type*> findAllStructsByName(Module &M, const std::unordered_set<std::string> &names) {
+    std::unordered_set<Type*> found;
+    for (auto s : M.getIdentifiedStructTypes()) {
+        if (names.contains(s->getName().operator std::string())) {
+            found.insert(s);
+            outs() << "Found matching struct " << s->getName() << "\n";
+        }
+    }
+    outs().flush();
+    return found;
+}

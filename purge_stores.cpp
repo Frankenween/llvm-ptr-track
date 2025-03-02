@@ -19,23 +19,13 @@ struct StorePurgerPass : public ModulePass {
     StorePurgerPass(): ModulePass(ID) {}
 
     bool runOnModule(Module &M) override {
-        findAllBadStructs(M);
+        restricted_for_store = findAllStructsByName(M, NO_PTR_STORE);
         removeAllStores(M);
         return false;
     }
     static char ID;
 private:
-    std::unordered_set<StructType*> restricted_for_store;
-
-    void findAllBadStructs(Module &M) {
-        for (auto s : M.getIdentifiedStructTypes()) {
-            if (NO_PTR_STORE.contains(s->getName().operator std::string())) {
-                restricted_for_store.insert(s);
-                outs() << "Found matching struct " << s->getName() << "\n";
-            }
-        }
-        outs().flush();
-    }
+    std::unordered_set<Type*> restricted_for_store;
 
     void removeAllStores(Module &M) {
         size_t purged = 0;

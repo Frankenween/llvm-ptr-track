@@ -35,7 +35,7 @@ set_target_properties(purge_stores PROPERTIES
 )
 
 add_custom_target(run_tests
-        "${PROJECT_SOURCE_DIR}/tests/test.sh" "${PROJECT_BINARY_DIR}/ir_instr.so"
+        "${PROJECT_SOURCE_DIR}/tests/test.sh" "${PROJECT_BINARY_DIR}/"
         DEPENDS ir_instrument
         DEPENDS purge_stores
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tests"
