@@ -21,10 +21,17 @@ FunctionType* dereferenceFPtr(Type *t) {
 }
 
 StructType* dereferenceStructPtr(Type *t) {
-    if (auto ptr = dyn_cast<PointerType>(t)) {
-        return dyn_cast<StructType>(t->getNonOpaquePointerElementType());
+    if (auto *ptr = dyn_cast<PointerType>(t)) {
+        return dyn_cast<StructType>(ptr->getNonOpaquePointerElementType());
     }
     return nullptr;
+}
+
+StructType* getStructType(Type *t) {
+    if (auto *st = dyn_cast<StructType>(t)) {
+        return st;
+    }
+    return dereferenceStructPtr(t);
 }
 
 Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value* src, Value* dst) {

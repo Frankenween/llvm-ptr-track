@@ -1,6 +1,7 @@
 #pragma once
 
 #include <set>
+#include <unordered_set>
 #include "llvm/IR/IRBuilder.h"
 
 using namespace llvm;
@@ -20,8 +21,17 @@ public:
 
     [[nodiscard]] const std::set<StructType*>& getInterestingTypes() const;
 private:
-    Module *M;
+    Module *M = nullptr;
+    /// T { G, *F } leads to T -> G and T -> F edges.
+    std::unordered_map<StructType*, std::unordered_set<StructType*>> type_graph;
+    std::unordered_map<StructType*, std::unordered_set<StructType*>> inv_type_graph;
     std::set<StructType*> interesting_types;
 
     void findInterestingStructs();
+
+    void buildTypeGraph();
+
+    void markChildrenUsed(StructType *t, std::unordered_set<StructType*> &dfs_used);
+
+    void markParentsUsed(StructType *t, std::unordered_set<StructType*> &dfs_used);
 };

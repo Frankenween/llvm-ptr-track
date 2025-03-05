@@ -12,6 +12,9 @@ FunctionType* dereferenceFPtr(Type *t);
 
 StructType* dereferenceStructPtr(Type *t);
 
+// T or T* return T
+StructType* getStructType(Type *t);
+
 Value* copyStructBetweenPointers(Module &M, IRBuilder<> &builder, Type* T, Value* src, Value* dst);
 
 std::unordered_set<Type*> findAllStructsByName(Module &M, const std::unordered_set<std::string> &names);
