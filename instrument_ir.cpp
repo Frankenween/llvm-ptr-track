@@ -209,6 +209,7 @@ private:
     // to track written and read values. Currently internal functions are skipped as they
     // cannot be called from outside.
     void propagateSingletons(Module &M) {
+        std::vector<Function*> todo_list;
         for (auto &f : M.getFunctionList()) {
             if (new_functions.contains(&f)) {
                 // Do not instrument newly created functions
@@ -226,8 +227,17 @@ private:
             if (!functionContainsInterestingStruct(f.getFunctionType())) {
                 continue;
             }
+
+            todo_list.push_back(&f);
+        }
+        size_t l = 0;
+        size_t r = todo_list.size();
+        outs() << "Making calls for functions [" << l << "; " << r << ")\n";
+        outs().flush();
+
+        for (auto i = l; i < r; i++) {
+            createDummyFunctionCall(M, todo_list[i]);
             outs().flush();
-            createDummyFunctionCall(M, &f);
         }
     }
 
