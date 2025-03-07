@@ -34,4 +34,6 @@ private:
     void markChildrenUsed(StructType *t, std::unordered_set<StructType*> &dfs_used);
 
     void markParentsUsed(StructType *t, std::unordered_set<StructType*> &dfs_used);
+
+    void markUsedGlobalRecursively(ConstantStruct *val, std::unordered_set<StructType*> &used);
 };

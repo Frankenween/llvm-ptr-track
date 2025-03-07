@@ -52,9 +52,9 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons pushed\n";
         outs().flush();
 
-//        implementAllInterestingDeclarations(M);
-//        outs() << "Functions implemented\n";
-//        outs().flush();
+        implementAllInterestingDeclarations(M);
+        outs() << "Functions implemented\n";
+        outs().flush();
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
@@ -264,7 +264,6 @@ private:
             if (&glob == singleton) {
                 continue;
             }
-            outs() << "Detected interesting global " << glob.getName() << "\n";
             // obj -> singleton
             copyStructBetweenPointers(M, builder, type, &glob, singleton);
             // maybe singleton -> obj?

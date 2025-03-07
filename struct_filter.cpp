@@ -32,7 +32,6 @@ void struct_filter::findInterestingStructs() {
         for (auto field : s->elements()) {
             if (isFunctionPointer(field)) {
                 // This struct contains a pointer to a function
-                interesting_types.insert(s);
                 markParentsUsed(s, interesting);
                 break;
             }
@@ -44,8 +43,15 @@ void struct_filter::findInterestingStructs() {
     // T { G } may have G defined but never accessed from any function
     // in this case T is passed to an external function, which will access G
     for (auto &glob : M->getGlobalList()) {
-        if (auto *t = dyn_cast<StructType>(glob.getType())) {
-            markChildrenUsed(t, used_structs);
+        if (dyn_cast<StructType>(glob.getValueType())) {
+            if (!glob.hasInitializer() || glob.isNullValue()) {
+                continue;
+            }
+            auto *initializer = dyn_cast<ConstantStruct>(glob.getInitializer());
+            if (!initializer || initializer->isZeroValue() || initializer->isNullValue()) {
+                continue;
+            }
+            markUsedGlobalRecursively(initializer, used_structs);
         }
     }
     // Get function arguments
@@ -85,6 +91,23 @@ void struct_filter::findInterestingStructs() {
         }
     }
     //outs().flush();
+}
+
+void struct_filter::markUsedGlobalRecursively(ConstantStruct *val, std::unordered_set<StructType*> &used) {
+    auto *t = val->getType();
+    // TODO: if there are two globals with the same type, but different initialized fields, one will be skipped
+    if (used.contains(t)) {
+        return;
+    }
+    used.insert(t);
+    for (size_t i = 0; i < val->getNumOperands(); i++) {
+        if (getStructType(t->getTypeAtIndex(i))) {
+            auto *field_init = dyn_cast<ConstantStruct>(val->getOperand(i));
+            if (field_init && !field_init->isNullValue()) {
+                markUsedGlobalRecursively(field_init, used);
+            }
+        }
+    }
 }
 
 void struct_filter::buildTypeGraph() {
