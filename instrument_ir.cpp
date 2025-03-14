@@ -131,6 +131,9 @@ private:
     // Run this AFTER creating singletons
     void replaceRestrictedCasts(Module &M) {
         for (auto &f : M) {
+            if (new_functions.contains(&f)) {
+                continue;
+            }
             std::vector<Instruction*> remove_list;
             for (auto &bb : f) {
                 for (auto &inst : bb) {
@@ -144,7 +147,8 @@ private:
                                     singletons[dereferenceStructPtr(dst_type)],
                                     [&](Use &u) {
                                 // FIXME: What's wrong with GEPs?
-                                return dyn_cast<GetElementPtrInst>(u.getUser()) == nullptr;
+                                return true;
+                                //return dyn_cast<GetElementPtrInst>(u.getUser()) == nullptr;
                             });
                         } else if (deref_dst_type &&
                                 type_tracker.isPtrToInterestingType(deref_dst_type->getNonOpaquePointerElementType())) {
@@ -362,7 +366,6 @@ private:
             } else if (type_tracker.isInterestingType(arg)) {
                 outs() << "WARNING: Function getting interesting type by value!!\n";
                 outs().flush();
-                // TODO: add value-pass support
             }
             i++;
         }
