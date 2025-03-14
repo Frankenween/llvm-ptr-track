@@ -40,6 +40,10 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons filled\n";
         outs().flush();
 
+        size_t replaced = replaceAllNegativeGEPs(M);
+        outs() << "Negative GEPs replaced: " << replaced << "\n";
+        outs().flush();
+
         replaceRestrictedCasts(M);
         outs() << "Casts replaced\n";
         outs().flush();
@@ -52,9 +56,10 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons pushed\n";
         outs().flush();
 
-        implementAllInterestingDeclarations(M);
-        outs() << "Functions implemented\n";
-        outs().flush();
+        // FIXME: explore ext4 module to see what's going on
+//        implementAllInterestingDeclarations(M);
+//        outs() << "Functions implemented\n";
+//        outs().flush();
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
@@ -172,7 +177,52 @@ private:
                 i->eraseFromParent();
             }
         }
+    }
 
+    // Negative GEPs are generally used by container_of-like macros, but they can easily trick pointer
+    // analysis tools, especially when this utility reuses one object for several calls.
+    // Replace every negative GEP with "random" integral address to prevent any interference.
+    // To make life happier, there is a replaceRestrictedCasts method: these GEPs are bitcasted to the
+    // parent type anyway, so we will get singleton parent on that stage.
+    size_t replaceAllNegativeGEPs(Module &M) {
+        LLVMContext &ctx = M.getContext();
+        IRBuilder<> builder(ctx);
+        size_t total_removed = 0;
+        for (auto &f : M) {
+            if (new_functions.contains(&f)) {
+                continue;
+            }
+            total_removed += replaceNegativeGEPs(&f, ctx, builder);
+        }
+        return total_removed;
+    }
+
+    size_t replaceNegativeGEPs(Function *f, LLVMContext &ctx, IRBuilder<> &builder) {
+        size_t replaced = 0;
+        // Avoid any pointer interference by using different addresses
+        static int64_t addr = 1024;
+        for (auto &bb : *f) {
+            for (auto &inst : bb) {
+                if (auto *gep = dyn_cast<GetElementPtrInst>(&inst)) {
+                    bool negative_gep = std::any_of(gep->indices().begin(), gep->indices().end(), [](Value *v) {
+                        if (auto *const_idx = dyn_cast<ConstantInt>(v)) {
+                            return const_idx->getValue().isNegative();
+                        }
+                        return false;
+                    });
+                    if (negative_gep) {
+                        gep->dump();
+                        Value *addr_val = ConstantInt::get(Type::getInt64Ty(ctx), addr);
+                        gep->replaceAllUsesWith(
+                            builder.CreateIntToPtr(addr_val, gep->getType())
+                        );
+                        replaced++;
+                        addr += 1024;
+                    }
+                }
+            }
+        }
+        return replaced;
     }
 
     // Make a call to the function and save the return value, if needed
