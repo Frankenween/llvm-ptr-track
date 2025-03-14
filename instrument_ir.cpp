@@ -87,16 +87,14 @@ struct StructVisitorPass : public ModulePass {
             outs().flush();
         }
 
-        // FIXME: explore ext4 module to see what's going on
-//        implementAllInterestingDeclarations(M);
-//        outs() << "Functions implemented\n";
-//        outs().flush();
         if (ImplementExternal.getValue()) {
             // FIXME: explore ext4 module to see what's going on
             implementAllInterestingDeclarations(M);
             outs() << "Functions implemented\n";
             outs().flush();
         }
+
+        removeDivOperator(M);
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
@@ -167,6 +165,29 @@ private:
         t->dump();
         outs().flush();
         exit(1);
+    }
+
+    // SVF uses LLVM-16, which doesn't support constant SDiv and UDiv instructions
+    // Replace them with zeroes, they are unlikely to make any difference
+    void removeDivOperator(Module &M) {
+        for (auto &f : M) {
+            if (new_functions.contains(&f)) {
+                continue;
+            }
+            for (auto &bb : f) {
+                for (auto &inst : bb) {
+                    for (size_t i = 0; i < inst.getNumOperands(); i++) {
+                        Value *op = inst.getOperand(i);
+                        if (auto *ce = dyn_cast<ConstantExpr>(op)) {
+                            if (ce->getOpcode() == Instruction::UDiv || ce->getOpcode() == Instruction::SDiv) {
+                                Constant *Zero = ConstantInt::get(ce->getType(), 0);
+                                inst.setOperand(i, Zero);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Find all bitcasts, that can lead to ptr leak and replace them
