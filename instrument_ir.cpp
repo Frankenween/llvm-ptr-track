@@ -4,12 +4,35 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/Support/CommandLine.h"
 #include "util.h"
 #include "struct_filter.h"
 
 using namespace llvm;
 
 static const std::string PREFIX = "mypass";
+
+static cl::opt<bool> RemoveNegativeGEPs(
+        "remove-neg-geps", cl::desc("Replace negative GEPs"), cl::init(true)
+        );
+
+static cl::opt<bool> ReplaceBitcasts(
+        "repl-bitcasts", cl::desc("Replace suspicious bitcasts"), cl::init(true)
+);
+
+static cl::opt<bool> CopyFromGlobals(
+        "copy-globals", cl::desc("Copy global values to singletons"), cl::init(true)
+);
+
+static cl::opt<bool> CallFunctions(
+        "call-functions",
+        cl::desc("Call external functions with singleton arguments"),
+        cl::init(true)
+);
+
+static cl::opt<bool> ImplementExternal(
+        "impl-extern", cl::desc("Implement external functions"), cl::init(true)
+);
 
 std::string funcStubName(const std::string &struct_name, size_t idx) {
     return PREFIX + "_" + struct_name + "_" + std::to_string(idx) + "_stub";
@@ -40,26 +63,40 @@ struct StructVisitorPass : public ModulePass {
         outs() << "Singletons filled\n";
         outs().flush();
 
-        size_t replaced = replaceAllNegativeGEPs(M);
-        outs() << "Negative GEPs replaced: " << replaced << "\n";
-        outs().flush();
+        if (RemoveNegativeGEPs.getValue()) {
+            size_t replaced = replaceAllNegativeGEPs(M);
+            outs() << "Negative GEPs replaced: " << replaced << "\n";
+            outs().flush();
+        }
 
-        replaceRestrictedCasts(M);
-        outs() << "Casts replaced\n";
-        outs().flush();
+        if (ReplaceBitcasts.getValue()) {
+            replaceRestrictedCasts(M);
+            outs() << "Casts replaced\n";
+            outs().flush();
+        }
 
-        detectAllGlobals(M);
-        outs() << "Globals resolved\n";
-        outs().flush();
+        if (CopyFromGlobals.getValue()) {
+            detectAllGlobals(M);
+            outs() << "Globals resolved\n";
+            outs().flush();
+        }
 
-        propagateSingletons(M);
-        outs() << "Singletons pushed\n";
-        outs().flush();
+        if (CallFunctions.getValue()) {
+            propagateSingletons(M);
+            outs() << "Singletons pushed\n";
+            outs().flush();
+        }
 
         // FIXME: explore ext4 module to see what's going on
 //        implementAllInterestingDeclarations(M);
 //        outs() << "Functions implemented\n";
 //        outs().flush();
+        if (ImplementExternal.getValue()) {
+            // FIXME: explore ext4 module to see what's going on
+            implementAllInterestingDeclarations(M);
+            outs() << "Functions implemented\n";
+            outs().flush();
+        }
 
         finalizeGlobalInitializer(M);
         finalizeFunctionCaller(M);
@@ -211,7 +248,6 @@ private:
                         return false;
                     });
                     if (negative_gep) {
-                        gep->dump();
                         Value *addr_val = ConstantInt::get(Type::getInt64Ty(ctx), addr);
                         gep->replaceAllUsesWith(
                             builder.CreateIntToPtr(addr_val, gep->getType())
