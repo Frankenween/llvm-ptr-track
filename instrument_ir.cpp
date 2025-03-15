@@ -367,17 +367,25 @@ private:
         builder.SetInsertPoint(global_initializer_bb);
 
         for (auto &glob : M.getGlobalList()) {
-            if (!type_tracker.isInterestingType(glob.getValueType())) {
-                continue;
+            auto ty = glob.getValueType();
+            auto *arr_ty = dyn_cast<ArrayType>(ty);
+            if (type_tracker.isInterestingType(ty)) {
+                auto *type = dyn_cast<StructType>(ty);
+                auto singleton = singletons[type];
+                if (&glob == singleton) {
+                    continue;
+                }
+                // obj -> singleton
+                copyStructBetweenPointers(M, builder, type, &glob, singleton);
+            } else if (arr_ty && type_tracker.isInterestingType(arr_ty->getElementType())) {
+                auto *type = dyn_cast<StructType>(arr_ty->getElementType());
+                auto singleton = singletons[type];
+
+                for (size_t i = 0; i < arr_ty->getNumElements(); i++) {
+                    auto *gep = builder.CreateConstGEP1_64(arr_ty, &glob, i);
+                    copyStructBetweenPointers(M, builder, type, gep, singleton);
+                }
             }
-            auto *type = dyn_cast<StructType>(glob.getValueType());
-            auto singleton = singletons[type];
-            if (&glob == singleton) {
-                continue;
-            }
-            // obj -> singleton
-            copyStructBetweenPointers(M, builder, type, &glob, singleton);
-            // maybe singleton -> obj?
         }
         outs().flush();
     }

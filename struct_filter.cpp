@@ -43,15 +43,33 @@ void struct_filter::findInterestingStructs() {
     // T { G } may have G defined but never accessed from any function
     // in this case T is passed to an external function, which will access G
     for (auto &glob : M->getGlobalList()) {
+        if (!glob.hasInitializer() || glob.isNullValue()) {
+            continue;
+        }
+        auto *initializer = glob.getInitializer();
+        if (!initializer || initializer->isZeroValue() || initializer->isNullValue()) {
+            continue;
+        }
         if (dyn_cast<StructType>(glob.getValueType())) {
-            if (!glob.hasInitializer() || glob.isNullValue()) {
+            auto *init_struct = dyn_cast<ConstantStruct>(initializer);
+            if (!init_struct) {
                 continue;
             }
-            auto *initializer = dyn_cast<ConstantStruct>(glob.getInitializer());
-            if (!initializer || initializer->isZeroValue() || initializer->isNullValue()) {
+            markUsedGlobalRecursively(init_struct, used_structs);
+        } else if (auto *arr_ty = dyn_cast<ArrayType>(glob.getValueType())) {
+            auto *init_arr = dyn_cast<ConstantArray>(glob.getInitializer());
+            auto *el_ty = dyn_cast<StructType>(arr_ty->getElementType());
+            if (!init_arr || !el_ty) {
                 continue;
             }
-            markUsedGlobalRecursively(initializer, used_structs);
+            for (size_t i = 0; i < initializer->getNumOperands(); i++) {
+                auto *el = dyn_cast<ConstantStruct>(initializer->getOperand(i));
+                if (!el) {
+                    // It is a zero initializer(usually as a marker of array end)
+                    continue;
+                }
+                markUsedGlobalRecursively(el, used_structs);
+            }
         }
     }
     // Get function arguments
