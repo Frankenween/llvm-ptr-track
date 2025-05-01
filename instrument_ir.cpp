@@ -42,6 +42,10 @@ std::string structSingletonName(const std::string &struct_name) {
     return PREFIX + "_" + struct_name + "_singleton";
 }
 
+std::string fArgSingletonName(const std::string &f_name, size_t idx) {
+    return PREFIX + "_" + f_name + "_arg_" + std::to_string(idx) + "_singleton";
+}
+
 struct StructVisitorPass : public ModulePass {
     StructVisitorPass(): ModulePass(ID) {}
 
@@ -51,6 +55,8 @@ struct StructVisitorPass : public ModulePass {
 
         createGlobalInitializer(M);
         createFunctionCaller(M);
+
+        processAllCallbackConsumers(M);
 
         // Create all possible stubs to be ready for function calls
         for (auto type : M.getIdentifiedStructTypes()) {
@@ -88,7 +94,6 @@ struct StructVisitorPass : public ModulePass {
         }
 
         if (ImplementExternal.getValue()) {
-            // FIXME: explore ext4 module to see what's going on
             implementAllInterestingDeclarations(M);
             outs() << "Functions implemented\n";
             outs().flush();
@@ -114,6 +119,12 @@ private:
     std::map<std::pair<StructType*, size_t>, Function*> function_stubs;
     // all added functions
     std::set<Function*> new_functions;
+    // singletons for callback consumption. useful only with external functions
+    std::map<std::pair<Function*, size_t>, GlobalVariable*> function_arg_singletons;
+    // function argument stubs.
+    // stubs for defined functions can have empty body
+    // stubs for external function should call corresponding singletons!
+    std::map<std::pair<Function*, size_t>, Function*> function_arg_stubs;
 
     // Singletons initializer
     Function* global_initializer = nullptr;
@@ -133,6 +144,14 @@ private:
         return std::ranges::any_of(
                 f_type->params(),
                 [this](Type *t) { return type_tracker.isInterestingTypeOrPtr(t); }
+        );
+    }
+
+    // Check if any function argument or return value are interesting
+    static bool functionContainsCallback(FunctionType *f_type) {
+        return std::ranges::any_of(
+                f_type->params(),
+                isFunctionPointer
         );
     }
 
@@ -165,6 +184,83 @@ private:
         t->dump();
         outs().flush();
         exit(1);
+    }
+
+    // Create stubs and singletons for function arguments
+    void processAllCallbackConsumers(Module &M) {
+        // Get function arguments
+        for (auto &f : M.getFunctionList()) {
+            if (new_functions.contains(&f)) {
+                continue;
+            }
+            size_t idx = 0;
+            for (auto *arg : f.getFunctionType()->params()) {
+                if (isFunctionPointer(arg)) {
+                    makeFunctionCallbackArgumentSingleton(M, f, idx);
+                    if (f.isDeclaration())
+                        createFArgStubBody(M, f, idx);
+                }
+                idx++;
+            }
+        }
+    }
+
+    // Create stub function body for tracking callback values
+    // passed to external functions.
+    // Done the same way as in structures.
+    void createFArgStubBody(Module &M, Function &f, size_t idx) {
+        Function *cb = function_arg_stubs[{&f, idx}];
+
+        LLVMContext &ctx = M.getContext();
+        IRBuilder<> builder(ctx);
+        BasicBlock *body = BasicBlock::Create(ctx, "", cb);
+
+        std::vector<Value*> args;
+        for (size_t i = 0; i < cb->arg_size(); i++) {
+            args.push_back(cb->getArg(i));
+        }
+
+        builder.SetInsertPoint(body);
+        auto singleton_value = builder.CreateLoad(
+                cb->getFunctionType()->getPointerTo(),
+                function_arg_singletons[{&f, idx}]
+                );
+
+        Value* call = builder.CreateCall(
+                cb->getFunctionType(), singleton_value, args
+                );
+
+        if (cb->getReturnType()->isVoidTy()) {
+            builder.CreateRetVoid();
+        } else {
+            builder.CreateRet(call);
+        }
+    }
+
+    void makeFunctionCallbackArgumentSingleton(Module &M, Function &f, size_t arg_idx) {
+        auto *f_ty = dyn_cast<FunctionType>(
+                f.getFunctionType()->params()[arg_idx]->getNonOpaquePointerElementType()
+                );
+        std::string stub_name = PREFIX + "_" + f.getName().operator std::string() +
+                "_arg_" + std::to_string(arg_idx) + "_stub";
+        Function *stub = Function::Create(
+                f_ty, Function::ExternalLinkage,
+                stub_name, M
+        );
+        new_functions.insert(stub);
+        function_arg_stubs[{&f, arg_idx}] = stub;
+
+        if (f.isDeclaration()) {
+            // This is an external symbol, so we should track what was written there
+            // Body will be implemented later - when all stubs are and singletons for args are created
+            auto *arg_singleton = new GlobalVariable(
+                    M, PointerType::get(f_ty, 0), false,
+                    GlobalValue::InternalLinkage,
+                    stub,
+                    fArgSingletonName(f.getName().operator std::string(), arg_idx)
+            );
+            function_arg_singletons[{&f, arg_idx}] = arg_singleton;
+        }
     }
 
     // SVF uses LLVM-16, which doesn't support constant SDiv and UDiv instructions
@@ -290,8 +386,14 @@ private:
         builder.SetInsertPoint(functions_caller_bb);
 
         std::vector<Value*> call_args;
+        size_t idx = 0;
         for (auto arg : f->getFunctionType()->params()) {
-            call_args.push_back(constructTypeValue(arg, builder));
+            if (function_arg_stubs[{f, idx}]) {
+                call_args.push_back(function_arg_stubs[{f, idx}]);
+            } else {
+                call_args.push_back(constructTypeValue(arg, builder));
+            }
+            idx++;
         }
         auto call_ret = builder.CreateCall(f, call_args);
 
@@ -335,7 +437,8 @@ private:
             if (f.hasPrivateLinkage()) {
                 continue;
             }
-            if (!functionContainsInterestingStruct(f.getFunctionType())) {
+            auto f_ty = f.getFunctionType();
+            if (!functionContainsInterestingStruct(f_ty) && !functionContainsCallback(f_ty)) {
                 continue;
             }
 
@@ -354,7 +457,9 @@ private:
 
     void implementAllInterestingDeclarations(Module &M) {
         for (auto &f : M.getFunctionList()) {
-            if (functionContainsInterestingStruct(f.getFunctionType()) && f.isDeclaration()) {
+            auto f_ty = f.getFunctionType();
+            if ((functionContainsCallback(f_ty) || functionContainsInterestingStruct(f_ty)) &&
+                f.isDeclaration()) {
                 createStubForDeclaredFunction(M, &f);
             }
         }
@@ -481,6 +586,8 @@ private:
             } else if (type_tracker.isInterestingType(arg)) {
                 outs() << "WARNING: Function getting interesting type by value!!\n";
                 outs().flush();
+            } else if (isFunctionPointer(arg)) {
+                builder.CreateStore(f->getArg(i), function_arg_singletons[{f, i}]);
             }
             i++;
         }
