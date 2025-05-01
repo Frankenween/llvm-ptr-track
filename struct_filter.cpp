@@ -88,6 +88,7 @@ void struct_filter::findInterestingStructs() {
                     used_structs.insert(getStructType(cast->getSrcTy()));
                     used_structs.insert(getStructType(cast->getDestTy()));
                 } else if (auto *gep = dyn_cast<GetElementPtrInst>(&inst)) {
+                    // TODO: recursively mark all flat types!
                     used_structs.insert(getStructType(gep->getSourceElementType()));
                     used_structs.insert(getStructType(gep->getResultElementType()));
                 } else if (auto *i2p = dyn_cast<IntToPtrInst>(&inst)) {

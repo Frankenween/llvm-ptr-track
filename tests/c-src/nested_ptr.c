@@ -34,3 +34,37 @@ void call_inner_t(struct inner_t *v) {
     v->f();
 }
 
+// https://elixir.bootlin.com/linux/v5.15/source/fs/fuse/virtio_fs.c#L1503
+struct fs_ops {
+    void (*free)(void *fc);
+    int (*dup)(void *fc, void *src_fc);
+    int (*parse_param)(void *fc, void *param);
+    int (*parse_monolithic)(void *fc, void *data);
+};
+
+struct fs_ops_1 {
+    void (*free)(void *fc);
+    int (*dup)(void *fc, void *src_fc);
+    int (*parse_param)(void *fc, void *param);
+    int (*parse_monolithic)(void *fc, void *data);
+};
+
+struct fs_ctx {
+    struct fs_ops *ops;
+    int dummy;
+};
+
+void fs_test_free(void *fc);
+int fs_test_dup(void *fc, void *src_fc);
+int fs_test_parse_monolithic(void *fc, void *data);
+
+static struct fs_ops_1 my_ops_obj = {
+        .free = fs_test_free,
+        .dup = fs_test_dup,
+        .parse_monolithic = fs_test_parse_monolithic
+};
+
+void register_fs(struct fs_ctx *ctx) {
+    ctx->ops = (struct fs_ops*)&my_ops_obj;
+}
+
