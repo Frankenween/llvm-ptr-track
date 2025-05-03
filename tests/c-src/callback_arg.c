@@ -37,3 +37,11 @@ void pass_to_external(t1 f) {
     external_register2(t3_f2, 0);
     internal_caller1(t2_f1, t3_f2);
 }
+
+// Test nested callbacks
+typedef void(*dummy_cb)();
+typedef void(*interesting_cb)(dummy_cb);
+
+void test_interesting_cb(interesting_cb cb) {
+    cb((dummy_cb)0x1234);
+}

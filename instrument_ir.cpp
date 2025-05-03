@@ -221,6 +221,8 @@ private:
         }
 
         builder.SetInsertPoint(body);
+        // TODO: update singletons for interesting types AND callbacks
+        // TODO: Example: net/sched/act_api. tcf_action_offload_del_ex function and flow_indr_block_bind_cb_t
         auto singleton_value = builder.CreateLoad(
                 cb->getFunctionType()->getPointerTo(),
                 function_arg_singletons[{&f, idx}]
@@ -459,7 +461,7 @@ private:
         for (auto &f : M.getFunctionList()) {
             auto f_ty = f.getFunctionType();
             if ((functionContainsCallback(f_ty) || functionContainsInterestingStruct(f_ty)) &&
-                f.isDeclaration()) {
+                f.isDeclaration() && !new_functions.contains(&f)) {
                 createStubForDeclaredFunction(M, &f);
             }
         }
